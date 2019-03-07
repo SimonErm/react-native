@@ -98,6 +98,7 @@ static void requestPhotoLibraryAccess(RCTPromiseRejectBlock reject, PhotosAuthor
 
 RCT_EXPORT_METHOD(saveToCameraRoll:(NSURLRequest *)request
                   type:(NSString *)type
+                  toAlbum:(NSString *)albumName
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 {
@@ -115,7 +116,31 @@ RCT_EXPORT_METHOD(saveToCameraRoll:(NSURLRequest *)request
     // arbitrary threads, not the main thread - this is safe
     // for now since all JS is queued and executed on a single thread.
     // We should reevaluate this if that assumption changes.
+    if(![albumName isEqualToString:@""]){
+      PHAssetCollection *collection = [self fetchAssetCollectionWithAlbumName: albumName];
+      if (collection == nil) {
+        //If we were unable to find a collection named "albumName" we'll create it before inserting the image
+        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+          [PHAssetCollectionChangeRequest creationRequestForAssetCollectionWithTitle: albumName];
+        } completionHandler:^(BOOL success, NSError * _Nullable error) {
+          if (error != nil) {
+            NSLog(@"Error inserting image into album: %@", error.localizedDescription);
+            reject(@"Error inserting image into album",nil,error);
+          }
+          
+          if (success) {
+            //Fetch the newly created collection (which we *assume* exists here)
+            PHAssetCollection *newCollection = [self fetchAssetCollectionWithAlbumName:albumName];
+            [self insertImage:inputImage intoAssetCollection: newCollection];
+          }
+        }];
+      } else {
+        //If we found the existing AssetCollection with the title "albumName", insert into it
+        [self insertImage:inputImage intoAssetCollection: collection];
+      }
+    }else{
     [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+      
       PHAssetChangeRequest *changeRequest;
 
       // Defaults to "photo". `type` is an optional param.
@@ -134,6 +159,7 @@ RCT_EXPORT_METHOD(saveToCameraRoll:(NSURLRequest *)request
         reject(kErrorUnableToSave, nil, error);
       }
     }];
+    }
   };
   
   void (^loadBlock)(void) = ^void() {
@@ -154,6 +180,38 @@ RCT_EXPORT_METHOD(saveToCameraRoll:(NSURLRequest *)request
   };
   
   requestPhotoLibraryAccess(reject, loadBlock);
+}
+
+- (void)insertImage:(UIImage *)image intoAssetCollection:(PHAssetCollection *)collection {
+  [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+    
+    //This will request a PHAsset be created for the UIImage
+    PHAssetCreationRequest *creationRequest = [PHAssetCreationRequest creationRequestForAssetFromImage:image];
+    
+    //Create a change request to insert the new PHAsset in the collection
+    PHAssetCollectionChangeRequest *request = [PHAssetCollectionChangeRequest changeRequestForAssetCollection:collection];
+    
+    //Add the PHAsset placeholder into the creation request.
+    //The placeholder is used because the actual PHAsset hasn't been created yet
+    if (request != nil && creationRequest.placeholderForCreatedAsset != nil) {
+      [request addAssets: @[creationRequest.placeholderForCreatedAsset]];
+    }
+  } completionHandler:^(BOOL success, NSError * _Nullable error) {
+    if (error != nil) {
+      NSLog(@"Error inserting image into asset collection: %@", error.localizedDescription);
+    }
+  }];
+}
+- (PHAssetCollection *)fetchAssetCollectionWithAlbumName:(NSString *)albumName {
+  PHFetchOptions *fetchOptions = [PHFetchOptions new];
+  //Provide the predicate to match the title of the album.
+  fetchOptions.predicate = [NSPredicate predicateWithFormat:[NSString stringWithFormat:@"title == '%@'", albumName]];
+  
+  //Fetch the album using the fetch option
+  PHFetchResult *fetchResult = [PHAssetCollection fetchAssetCollectionsWithType:PHAssetCollectionTypeAlbum subtype:PHAssetCollectionSubtypeAlbumRegular options:fetchOptions];
+  
+  //Assuming the album exists and no album shares it's name, it should be the only result fetched
+  return fetchResult.firstObject;
 }
 
 static void RCTResolvePromise(RCTPromiseResolveBlock resolve,

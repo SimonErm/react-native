@@ -180,6 +180,7 @@ class CameraRoll {
    */
   static saveToCameraRoll(
     tag: string,
+    album:string=""
     type?: 'photo' | 'video',
   ): Promise<string> {
     invariant(
@@ -200,7 +201,7 @@ class CameraRoll {
       mediaType = 'video';
     }
 
-    return RCTCameraRollManager.saveToCameraRoll(tag, mediaType);
+    return RCTCameraRollManager.saveToCameraRoll(tag, mediaType,album);
   }
 
   /**
